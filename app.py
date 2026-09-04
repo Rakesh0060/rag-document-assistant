@@ -82,7 +82,7 @@ else:
             retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
             docs = retriever.invoke(query)
             context = "\n\n".join([d.page_content for d in docs])
-            llm = ChatGroq(groq_api_key=groq_key, model_name="llama-3.3-70b-versatile")
+            llm = ChatGroq(groq_api_key=groq_key, model_name="llama-3.1-8b-instant")
             prompt = f"Answer based on context:\nContext: {context}\n\nQuestion: {query}\nAnswer concisely:"
             response = llm.invoke(prompt)
             st.write("### Answer:")
