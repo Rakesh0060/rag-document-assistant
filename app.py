@@ -1,8 +1,9 @@
-import streamlit as st, os, fitz
+import streamlit as st, fitz
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
+from groq import Groq
 
 st.set_page_config(page_title="RAG Assistant")
 st.title("📄 RAG - 25 PDFs Supported")
@@ -37,14 +38,30 @@ with st.spinner(f"Processing {len(uploaded_files)} PDFs... this takes 60 sec"):
 st.success(f"✅ Loaded {len(uploaded_files)} PDFs!")
 
 groq_key = st.sidebar.text_input("Groq API Key", type="password")
+
+# Fetch models available to THIS key and show dropdown
+available_models = []
+if groq_key:
+    try:
+        client = Groq(api_key=groq_key.strip())
+        available_models = sorted([m.id for m in client.models.list()])
+    except Exception as e:
+        st.sidebar.error(f"Invalid API key: {e}")
+
+model_id = st.sidebar.selectbox(
+    "Select model (only ones your key can use)",
+    available_models or ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+)
+
 query = st.text_input("Ask about your documents:")
 
 if query and groq_key:
     try:
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-        context = "\n".join([d.page_content for d in retriever.invoke(query)])
-        llm = ChatGroq(groq_api_key=groq_key.strip(), model="llama-3.1-8b-instant")
-        response = llm.invoke(f"Context: {context}\n\nQ: {query}\nAnswer briefly:")
+        with st.spinner("Retrieving & generating answer..."):
+            retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+            context = "\n".join([d.page_content for d in retriever.invoke(query)])
+            llm = ChatGroq(groq_api_key=groq_key.strip(), model=model_id)
+            response = llm.invoke(f"Context: {context}\n\nQ: {query}\nAnswer briefly:")
         st.write(response.content)
     except Exception as e:
         st.error(f"Groq error: {type(e).__name__}: {e}")
