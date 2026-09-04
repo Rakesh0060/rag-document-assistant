@@ -7,67 +7,83 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 
 st.set_page_config(page_title="RAG Document Assistant", layout="wide")
-st.title("📄 RAG Document Assistant")
+st.title("📄 RAG Document Assistant - 25 PDFs Supported")
 
 PDF_FOLDER = "data/pdfs"
 CHROMA_DIR = "chroma_db"
 
+# Create folders
+os.makedirs(PDF_FOLDER, exist_ok=True)
+os.makedirs(CHROMA_DIR, exist_ok=True)
+
+st.sidebar.header("Upload PDFs")
+uploaded_files = st.sidebar.file_uploader("Upload up to 25 PDFs", type="pdf", accept_multiple_files=True)
+
 @st.cache_resource
-def load_vectorstore():
-    # Create folders if missing - this fixes your FileNotFoundError
-    if not os.path.exists(PDF_FOLDER):
-        os.makedirs(PDF_FOLDER, exist_ok=True)
-    if not os.path.exists(CHROMA_DIR):
-        os.makedirs(CHROMA_DIR, exist_ok=True)
+def get_embeddings():
+    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-    files = [f for f in os.listdir(PDF_FOLDER) if f.endswith(".pdf")]
-    
-    if not files:
-        return None
-
+def process_pdfs(pdf_files):
     all_texts = []
-    for pdf_file in files:
-        path = os.path.join(PDF_FOLDER, pdf_file)
+    for pdf_file in pdf_files:
         try:
-            doc = fitz.open(path)
+            # Read from uploaded file or from disk
+            if hasattr(pdf_file, 'read'):
+                doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
+            else:
+                doc = fitz.open(pdf_file)
+            
             text = ""
             for page in doc:
                 text += page.get_text()
             if text.strip():
                 all_texts.append(text)
         except Exception as e:
-            st.warning(f"Could not read {pdf_file}: {e}")
-
+            st.warning(f"Skipped {pdf_file}: {e}")
+    
     if not all_texts:
         return None
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     docs = splitter.create_documents(all_texts)
-    
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embeddings = get_embeddings()
     vectorstore = Chroma.from_documents(docs, embeddings, persist_directory=CHROMA_DIR)
     return vectorstore
 
-vectorstore = load_vectorstore()
+# Load logic
+vectorstore = None
+
+# 1. If user uploaded via UI - use those (for 25 PDFs)
+if uploaded_files:
+    if len(uploaded_files) > 25:
+        st.sidebar.error("Max 25 PDFs only!")
+    else:
+        with st.spinner(f"Processing {len(uploaded_files)} PDFs..."):
+            vectorstore = process_pdfs(uploaded_files)
+        st.sidebar.success(f"Loaded {len(uploaded_files)} PDFs from upload!")
+
+# 2. If no upload, try load from GitHub folder (for 2-3 demo PDFs)
+else:
+    files = [os.path.join(PDF_FOLDER, f) for f in os.listdir(PDF_FOLDER) if f.endswith(".pdf")]
+    if files:
+        with st.spinner(f"Loading {len(files)} PDFs from GitHub..."):
+            vectorstore = process_pdfs(files)
 
 if not vectorstore:
-    st.warning(f"No PDFs found in {PDF_FOLDER}. Please upload PDFs to your GitHub repo in data/pdfs/ folder.")
-    st.info("To fix: Go to GitHub > data/pdfs > Add file > Upload files > upload 1-2 PDFs")
+    st.info("👈 Upload PDFs from sidebar (up to 25) to start chatting")
 else:
-    st.success(f"Loaded {len(os.listdir(PDF_FOLDER))} PDFs!")
-    
     groq_key = st.sidebar.text_input("Enter Groq API Key (free)", type="password")
     query = st.text_input("Ask a question about your documents:")
     
     if query:
         if not groq_key:
-            st.warning("Enter Groq API key in sidebar - get free from groq.com")
+            st.warning("Enter Groq API key in sidebar - get from groq.com")
         else:
-            retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+            retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
             docs = retriever.invoke(query)
             context = "\n\n".join([d.page_content for d in docs])
             llm = ChatGroq(groq_api_key=groq_key, model_name="llama-3.3-70b-versatile")
-            prompt = f"Answer based on context:\nContext: {context}\n\nQuestion: {query}\nAnswer:"
+            prompt = f"Answer based on context:\nContext: {context}\n\nQuestion: {query}\nAnswer concisely:"
             response = llm.invoke(prompt)
             st.write("### Answer:")
             st.write(response.content)
