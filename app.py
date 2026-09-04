@@ -18,9 +18,8 @@ if not uploaded_files:
     st.info("👉 Upload PDFs from sidebar. For 25 PDFs, upload 10+10+5 in 3 batches")
     st.stop()
 
-# Process only 10 at a time to avoid throttling
 if len(uploaded_files) > 10:
-    st.sidebar.warning(f"You uploaded {len(uploaded_files)}. Processing first 10 only to avoid crash. Upload remaining after test.")
+    st.sidebar.warning(f"You uploaded {len(uploaded_files)}. Processing first 10 only.")
     uploaded_files = uploaded_files[:10]
 
 with st.spinner(f"Processing {len(uploaded_files)} PDFs... this takes 60 sec"):
@@ -28,8 +27,9 @@ with st.spinner(f"Processing {len(uploaded_files)} PDFs... this takes 60 sec"):
     for f in uploaded_files:
         doc = fitz.open(stream=f.read(), filetype="pdf")
         text = "".join([page.get_text() for page in doc])
-        if text.strip(): all_texts.append(text)
-    
+        if text.strip():
+            all_texts.append(text)
+
     splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
     docs = splitter.create_documents(all_texts)
     vectorstore = Chroma.from_documents(docs, get_embeddings())
@@ -40,10 +40,13 @@ groq_key = st.sidebar.text_input("Groq API Key", type="password")
 query = st.text_input("Ask about your documents:")
 
 if query and groq_key:
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-    context = "\n".join([d.page_content for d in retriever.invoke(query)])
-    llm = ChatGroq(groq_api_key=groq_key, model_name="llama-3.1-8b-instant")
-    response = llm.invoke(f"Context: {context}\n\nQ: {query}\nAnswer briefly:")
-    st.write(response.content)
+    try:
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+        context = "\n".join([d.page_content for d in retriever.invoke(query)])
+        llm = ChatGroq(groq_api_key=groq_key.strip(), model="llama-3.1-8b-instant")
+        response = llm.invoke(f"Context: {context}\n\nQ: {query}\nAnswer briefly:")
+        st.write(response.content)
+    except Exception as e:
+        st.error(f"Groq error: {type(e).__name__}: {e}")
 elif query:
     st.warning("Enter Groq key in sidebar")
